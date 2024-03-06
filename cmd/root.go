@@ -17,6 +17,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -44,6 +45,13 @@ type GenericOptions struct {
 	context   string
 	user      string
 }
+
+var (
+	optionOutput     string
+	optionTimestamp  bool
+	timestamp        int64 = metav1.Now().Unix()
+	optionClientSide bool
+)
 
 func NewCommand() *cobra.Command {
 	o := &GenericOptions{
@@ -77,7 +85,21 @@ func NewCommand() *cobra.Command {
 		},
 	}
 
-	o.configFlags.AddFlags(cmd.Flags())
+	cmd.Flags().StringVarP(&optionOutput, "output", "o", ".", "output path")
+	cmd.Flags().BoolVar(&optionTimestamp, "timestamp", false, "suffix timestamp")
+	cmd.Flags().BoolVar(&optionClientSide, "client", false, "remove server-side applied fields")
+
+	// o.configFlags.AddFlags(cmd.Flags())
+	// manually add flags
+	if o.configFlags.Context != nil {
+		cmd.Flags().StringVar(o.configFlags.Context, "context", *o.configFlags.Context, "The name of the kubeconfig context to use")
+	}
+	if o.configFlags.Username != nil {
+		cmd.Flags().StringVar(o.configFlags.Namespace, "namespace", *o.configFlags.Namespace, "If present, the namespace scope for this CLI request")
+	}
+	if o.configFlags.Username != nil {
+		cmd.Flags().StringVar(o.configFlags.Username, "user", *o.configFlags.Username, "The name of the kubeconfig user to use")
+	}
 	return cmd
 }
 
@@ -162,13 +184,14 @@ func (o *GenericOptions) downloadAllResources(kind string) error {
 	}
 
 	for _, item := range unstructured.Items {
+		filterServerSideFields(&item)
 		content, err := yaml.Marshal(item.Object)
 		if err != nil {
 			return err
 		}
 
 		name := item.Object["metadata"].(map[string]interface{})["name"].(string)
-		filename := fmt.Sprintf("%s_%s.yaml", gvr.Resource, name)
+		filename := getFilename(*gvr, name)
 		err = os.WriteFile(filename, content, 0644)
 		if err != nil {
 			return err
@@ -178,6 +201,19 @@ func (o *GenericOptions) downloadAllResources(kind string) error {
 	}
 
 	return nil
+}
+
+func getFilename(gvr schema.GroupVersionResource, name string) string {
+	if optionTimestamp {
+		return fmt.Sprintf("%s_%s_%d.yaml", gvr.Resource, name, timestamp)
+	}
+	return fmt.Sprintf("%s_%s.yaml", gvr.Resource, name)
+}
+
+func filterServerSideFields(unstructured *unstructured.Unstructured) {
+	if optionClientSide {
+		slog.Info("TODO: filter server side fields")
+	}
 }
 
 func (o *GenericOptions) downloadTargetResource(kind string, name string) error {
@@ -198,12 +234,13 @@ func (o *GenericOptions) downloadTargetResource(kind string, name string) error 
 		return err
 	}
 
+	filterServerSideFields(unstructured)
 	content, err := yaml.Marshal(unstructured.Object)
 	if err != nil {
 		return err
 	}
 
-	filename := fmt.Sprintf("%s_%s.yaml", gvr.Resource, name)
+	filename := getFilename(*gvr, name)
 	err = os.WriteFile(filename, content, 0644)
 	if err != nil {
 		return err
