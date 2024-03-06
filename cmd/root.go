@@ -7,16 +7,17 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v2"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
-	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd/api"
+	"k8s.io/kubectl/pkg/cmd/util"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-
-	"k8s.io/client-go/dynamic"
 )
 
 var (
@@ -35,8 +36,9 @@ type GenericOptions struct {
 
 	args []string
 
-	restConfig *rest.Config
-	rawConfig  api.Config
+	utilFactory util.Factory
+	restConfig  *rest.Config
+	rawConfig   api.Config
 
 	namespace string
 	context   string
@@ -66,7 +68,8 @@ func NewCommand() *cobra.Command {
 			slog.Info("download-cmd: validate")
 
 			if err := o.Run(); err != nil {
-				return err
+				fmt.Printf("failed: %s\n", err)
+				return nil
 			}
 			slog.Info("download-cmd: run")
 
@@ -82,6 +85,7 @@ func (o *GenericOptions) Complete(cmd *cobra.Command, args []string) error {
 	var err error
 
 	o.args = args
+	o.utilFactory = util.NewFactory(o.configFlags)
 
 	configLoader := o.configFlags.ToRawKubeConfigLoader()
 	o.restConfig, err = configLoader.ClientConfig()
@@ -140,40 +144,113 @@ func (o *GenericOptions) Run() error {
 }
 
 func (o *GenericOptions) downloadAllResources(kind string) error {
-	clientset, err := kubernetes.NewForConfig(o.restConfig)
+	gvr, err := o.parseGroupVersionResource(kind)
 	if err != nil {
 		return err
 	}
 
-	resources, err := clientset.AppsV1().Deployments(o.namespace).List(context.TODO(), metav1.ListOptions{})
+	slog.Info("found resource", "group", gvr.Group, "version", gvr.Version, "resource", gvr.Resource)
 
+	dynamicClient, err := dynamic.NewForConfig(o.restConfig)
 	if err != nil {
 		return err
 	}
 
-	for _, resource := range resources.Items {
-		fmt.Println(resource.Name)
+	unstructured, err := dynamicClient.Resource(*gvr).Namespace(o.namespace).List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+
+	for _, item := range unstructured.Items {
+		content, err := yaml.Marshal(item.Object)
+		if err != nil {
+			return err
+		}
+
+		name := item.Object["metadata"].(map[string]interface{})["name"].(string)
+		filename := fmt.Sprintf("%s_%s.yaml", gvr.Resource, name)
+		err = os.WriteFile(filename, content, 0644)
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("downloaded: %s\n", filename)
 	}
 
 	return nil
 }
 
 func (o *GenericOptions) downloadTargetResource(kind string, name string) error {
+	gvr, err := o.parseGroupVersionResource(kind)
+	if err != nil {
+		return err
+	}
+
+	slog.Info("found resource", "group", gvr.Group, "version", gvr.Version, "resource", gvr.Resource, "name", name)
+
 	dynamicClient, err := dynamic.NewForConfig(o.restConfig)
 	if err != nil {
 		return err
 	}
 
-	gvr := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: kind}
-
-	unstructuredList, err := dynamicClient.Resource(gvr).Namespace(o.namespace).List(context.TODO(), metav1.ListOptions{})
+	unstructured, err := dynamicClient.Resource(*gvr).Namespace(o.namespace).Get(context.TODO(), name, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
 
-	for _, resource := range unstructuredList.Items {
-		fmt.Println(resource.GetName())
+	content, err := yaml.Marshal(unstructured.Object)
+	if err != nil {
+		return err
 	}
 
+	filename := fmt.Sprintf("%s_%s.yaml", gvr.Resource, name)
+	err = os.WriteFile(filename, content, 0644)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("downloaded: %s\n", filename)
+
 	return nil
+}
+
+func (o *GenericOptions) parseGroupVersionResource(kind string) (*schema.GroupVersionResource, error) {
+	convert2GVR := func(mapping *meta.RESTMapping, err error) (*schema.GroupVersionResource, error) {
+		if err != nil {
+			return nil, err
+		}
+		return &schema.GroupVersionResource{
+			Group:    mapping.Resource.Group,
+			Version:  mapping.Resource.Version,
+			Resource: mapping.Resource.Resource,
+		}, nil
+	}
+
+	restMapper, err := o.utilFactory.ToRESTMapper()
+	if err != nil {
+		return nil, err
+	}
+
+	gvr, resource := schema.ParseResourceArg(kind)
+	if gvr == nil {
+		slog.Info("version is empty")
+
+		withoutVersion := resource.WithVersion("")
+		gvr = &withoutVersion
+	}
+
+	slog.Info("parsed resource", "group", gvr.Group, "version", gvr.Version, "resource", gvr.Resource)
+
+	gvk, err := restMapper.KindFor(*gvr)
+	if err != nil {
+		_, kind := schema.ParseKindArg(kind)
+
+		slog.Info("group/version invalid, parse kind", "group", kind.Group, "kind", kind.Kind)
+
+		return convert2GVR(restMapper.RESTMapping(kind, ""))
+	}
+
+	slog.Info("found fully specific kind for resource", "group", gvk.Group, "version", gvk.Version, "kind", gvk.Kind)
+
+	return convert2GVR(restMapper.RESTMapping(gvk.GroupKind(), gvk.Version))
 }
