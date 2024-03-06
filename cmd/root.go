@@ -14,6 +14,9 @@ import (
 	"k8s.io/client-go/tools/clientcmd/api"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+
+	"k8s.io/client-go/dynamic"
 )
 
 var (
@@ -156,5 +159,21 @@ func (o *GenericOptions) downloadAllResources(kind string) error {
 }
 
 func (o *GenericOptions) downloadTargetResource(kind string, name string) error {
+	dynamicClient, err := dynamic.NewForConfig(o.restConfig)
+	if err != nil {
+		return err
+	}
+
+	gvr := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: kind}
+
+	unstructuredList, err := dynamicClient.Resource(gvr).Namespace(o.namespace).List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+
+	for _, resource := range unstructuredList.Items {
+		fmt.Println(resource.GetName())
+	}
+
 	return nil
 }
