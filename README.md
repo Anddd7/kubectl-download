@@ -14,6 +14,23 @@ kubectl download deploy my-deploy
 kubectl download ingress my-ingress -n my-namespace
 ```
 
+### Completion
+
+Register completion for plugins for kubectl
+
+```sh
+# download completion shell script
+curl -o kubectl_complete-download https://raw.githubusercontent.com/Anddd7/kubectl-download/main/completion/kubectl_complete-download
+
+# add execute permission
+chmod +x kubectl_complete-download
+
+# move to krew bin directory
+mv kubectl_complete-download ~/.krew/bin
+```
+
+Or using [plugin-completion](https://github.com/marckhouzam/kubectl-plugin_completion) ...
+
 ## TODO
 
 - [x] docs
@@ -23,4 +40,6 @@ kubectl download ingress my-ingress -n my-namespace
   - or delete key from map interface before marshalling
 - [x] github workflow
 - [x] renovate
-- [ ] zsh complete
+- [x] zsh complete
+  - [ ] get api-resources from kube cache
+  - [ ] resource name completion

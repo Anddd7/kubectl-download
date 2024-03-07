@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Anddd7/kubectldownload/pkg"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v2"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
@@ -84,6 +85,19 @@ func NewCommand() *cobra.Command {
 		Use:     "kubectl-download [kind] [name]",
 		Short:   shortText,
 		Example: helperText,
+		Args:    cobra.MaximumNArgs(2),
+		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			if len(args) > 0 {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+
+			resourceNames, err := pkg.GetAPIResources()
+			if err != nil {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+
+			return resourceNames, cobra.ShellCompDirectiveNoFileComp
+		},
 		RunE: func(c *cobra.Command, args []string) error {
 			if o.debug {
 				opts := slog.HandlerOptions{Level: slog.LevelDebug}
@@ -127,8 +141,6 @@ func NewCommand() *cobra.Command {
 	if o.configFlags.Username != nil {
 		cmd.Flags().StringVar(o.configFlags.Username, "user", *o.configFlags.Username, "The name of the kubeconfig user to use")
 	}
-
-	cmd.AddCommand(completionCmd)
 
 	return cmd
 }
