@@ -23,6 +23,19 @@ import (
 )
 
 var (
+	shortText = "Output and download any kubernetes resources in to named files."
+
+	helperText = `
+# download all pods
+kubectl donwload pod
+
+# download ingress in a specific namespace
+kubectl download ingress my-ingress -n my-namespace
+
+# download pod in dist folder with prefix and suffix
+kubectl download pod my-pod --prefix my-prefix --suffix my-suffix -o dist
+	`
+
 	errNoContext = fmt.Errorf("no context is currently set, use %q to select a new one", "kubectl config use-context <context>")
 )
 
@@ -39,6 +52,8 @@ type CommandOptions struct {
 
 	// input args
 	args []string
+
+	debug bool
 
 	// kubectl flags
 	namespace string
@@ -65,30 +80,35 @@ func NewCommand() *cobra.Command {
 	}
 
 	cmd := &cobra.Command{
-		Use:   "kubectl-download [kind] [name]",
-		Short: "download resource into a file",
+		Use:     "kubectl-download [kind] [name]",
+		Short:   shortText,
+		Example: helperText,
 		RunE: func(c *cobra.Command, args []string) error {
+			if o.debug {
+				opts := slog.HandlerOptions{Level: slog.LevelDebug}
+				slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &opts)))
+			}
+
 			if err := o.Complete(c, args); err != nil {
 				return err
 			}
-			slog.Info("download-cmd: complete")
-			slog.Info("genericOptions: ", "namespace", o.namespace, "context", o.context, "user", o.user)
-			slog.Info(fmt.Sprintf("args %v", o.args))
+			slog.Debug("genericOptions: ", "namespace", o.namespace, "context", o.context, "user", o.user)
+			slog.Debug(fmt.Sprintf("args %v", o.args))
 
 			if err := o.Validate(); err != nil {
 				return err
 			}
-			slog.Info("download-cmd: validate")
 
 			if err := o.Run(); err != nil {
 				fmt.Printf("failed: %s\n", err)
 				return nil
 			}
-			slog.Info("download-cmd: run")
 
 			return nil
 		},
 	}
+
+	cmd.Flags().BoolVar(&o.debug, "debug", false, "enable debug logging")
 
 	cmd.Flags().StringVarP(&o.output, "output", "o", ".", "output path")
 	cmd.Flags().BoolVar(&o.clientFormat, "client", false, "only output client applicable fields")
@@ -182,7 +202,7 @@ func (o *CommandOptions) downloadAllResources(kind string) error {
 		return err
 	}
 
-	slog.Info("found resource", "group", gvr.Group, "version", gvr.Version, "resource", gvr.Resource)
+	slog.Debug("found resource", "group", gvr.Group, "version", gvr.Version, "resource", gvr.Resource)
 
 	dynamicClient, err := dynamic.NewForConfig(o.restConfig)
 	if err != nil {
@@ -231,7 +251,7 @@ func (o *CommandOptions) getFilename(gvr schema.GroupVersionResource, name strin
 
 func (o *CommandOptions) filterServerSideFields(unstructured *unstructured.Unstructured) {
 	if o.clientFormat {
-		slog.Info("TODO: filter server side fields")
+		slog.Debug("TODO: filter server side fields")
 	}
 }
 
@@ -241,7 +261,7 @@ func (o *CommandOptions) downloadTargetResource(kind string, name string) error 
 		return err
 	}
 
-	slog.Info("found resource", "group", gvr.Group, "version", gvr.Version, "resource", gvr.Resource, "name", name)
+	slog.Debug("found resource", "group", gvr.Group, "version", gvr.Version, "resource", gvr.Resource, "name", name)
 
 	dynamicClient, err := dynamic.NewForConfig(o.restConfig)
 	if err != nil {
@@ -289,24 +309,24 @@ func (o *CommandOptions) parseGroupVersionResource(kind string) (*schema.GroupVe
 
 	gvr, resource := schema.ParseResourceArg(kind)
 	if gvr == nil {
-		slog.Info("version is empty")
+		slog.Debug("version is empty")
 
 		withoutVersion := resource.WithVersion("")
 		gvr = &withoutVersion
 	}
 
-	slog.Info("parsed resource", "group", gvr.Group, "version", gvr.Version, "resource", gvr.Resource)
+	slog.Debug("parsed resource", "group", gvr.Group, "version", gvr.Version, "resource", gvr.Resource)
 
 	gvk, err := restMapper.KindFor(*gvr)
 	if err != nil {
 		_, kind := schema.ParseKindArg(kind)
 
-		slog.Info("group/version invalid, parse kind", "group", kind.Group, "kind", kind.Kind)
+		slog.Debug("group/version invalid, parse kind", "group", kind.Group, "kind", kind.Kind)
 
 		return convert2GVR(restMapper.RESTMapping(kind, ""))
 	}
 
-	slog.Info("found fully specific kind for resource", "group", gvk.Group, "version", gvk.Version, "kind", gvk.Kind)
+	slog.Debug("found fully specific kind for resource", "group", gvk.Group, "version", gvk.Version, "kind", gvk.Kind)
 
 	return convert2GVR(restMapper.RESTMapping(gvk.GroupKind(), gvk.Version))
 }
