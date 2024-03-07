@@ -7,5 +7,5 @@
 - [ ] docs
 - [ ] support krew install
 - [ ] filter server fields (e.g. managed fields)
-- [ ] github workflow
+- [x] github workflow
 - [ ] renovate

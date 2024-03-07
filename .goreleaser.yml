@@ -2,9 +2,9 @@ before:
   hooks:
   - go mod download
 builds:
-- id: kubectl-tree
-  main: ./cmd/kubectl-tree
-  binary: kubectl-tree
+- id: kubectl-download
+  main: .
+  binary: kubectl-download
   env:
   - CGO_ENABLED=0
   goos:
@@ -20,7 +20,7 @@ builds:
 
 archives:
 - builds:
-  - kubectl-tree
+  - kubectl-download
   name_template: "{{ .ProjectName }}_{{ .Tag }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
   wrap_in_directory: false
   format: tar.gz
