@@ -19,6 +19,8 @@ kubectl download ingress my-ingress -n my-namespace
 - [x] docs
 - [x] support krew install
 - [ ] filter server fields (e.g. managed fields)
+  - drop specific fields in yaml file
+  - or delete key from map interface before marshalling
 - [x] github workflow
 - [x] renovate
 - [ ] zsh complete
