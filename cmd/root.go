@@ -197,19 +197,24 @@ func (o *CommandOptions) Run() error {
 }
 
 func (o *CommandOptions) downloadAllResources(kind string) error {
-	gvr, err := o.parseGroupVersionResource(kind)
+	mapping, err := o.parseResourceRestMapping(kind)
 	if err != nil {
 		return err
 	}
 
-	slog.Debug("found resource", "group", gvr.Group, "version", gvr.Version, "resource", gvr.Resource)
+	slog.Debug("found resource", "scope", mapping.Scope, "group", mapping.GroupVersionKind.Group, "version", mapping.GroupVersionKind.Version, "resource", mapping.GroupVersionKind.Kind)
 
 	dynamicClient, err := dynamic.NewForConfig(o.restConfig)
 	if err != nil {
 		return err
 	}
 
-	unstructured, err := dynamicClient.Resource(*gvr).Namespace(o.namespace).List(context.TODO(), metav1.ListOptions{})
+	var unstructured *unstructured.UnstructuredList
+	if mapping.Scope.Name() == meta.RESTScopeNameNamespace {
+		unstructured, err = dynamicClient.Resource(mapping.Resource).Namespace(o.namespace).List(context.TODO(), metav1.ListOptions{})
+	} else {
+		unstructured, err = dynamicClient.Resource(mapping.Resource).List(context.TODO(), metav1.ListOptions{})
+	}
 	if err != nil {
 		return err
 	}
@@ -222,7 +227,7 @@ func (o *CommandOptions) downloadAllResources(kind string) error {
 		}
 
 		name := item.Object["metadata"].(map[string]interface{})["name"].(string)
-		filename := o.getFilename(*gvr, name)
+		filename := o.getFilename(mapping.Resource, name)
 		err = os.WriteFile(filename, content, 0644)
 		if err != nil {
 			return err
@@ -256,19 +261,24 @@ func (o *CommandOptions) filterServerSideFields(unstructured *unstructured.Unstr
 }
 
 func (o *CommandOptions) downloadTargetResource(kind string, name string) error {
-	gvr, err := o.parseGroupVersionResource(kind)
+	mapping, err := o.parseResourceRestMapping(kind)
 	if err != nil {
 		return err
 	}
 
-	slog.Debug("found resource", "group", gvr.Group, "version", gvr.Version, "resource", gvr.Resource, "name", name)
+	slog.Debug("found resource", "scope", mapping.Scope, "group", mapping.GroupVersionKind.Group, "version", mapping.GroupVersionKind.Version, "resource", mapping.GroupVersionKind.Kind)
 
 	dynamicClient, err := dynamic.NewForConfig(o.restConfig)
 	if err != nil {
 		return err
 	}
 
-	unstructured, err := dynamicClient.Resource(*gvr).Namespace(o.namespace).Get(context.TODO(), name, metav1.GetOptions{})
+	var unstructured *unstructured.Unstructured
+	if mapping.Scope.Name() == meta.RESTScopeNameNamespace {
+		unstructured, err = dynamicClient.Resource(mapping.Resource).Namespace(o.namespace).Get(context.TODO(), name, metav1.GetOptions{})
+	} else {
+		unstructured, err = dynamicClient.Resource(mapping.Resource).Get(context.TODO(), name, metav1.GetOptions{})
+	}
 	if err != nil {
 		return err
 	}
@@ -279,7 +289,7 @@ func (o *CommandOptions) downloadTargetResource(kind string, name string) error 
 		return err
 	}
 
-	filename := o.getFilename(*gvr, name)
+	filename := o.getFilename(mapping.Resource, name)
 	err = os.WriteFile(filename, content, 0644)
 	if err != nil {
 		return err
@@ -290,18 +300,7 @@ func (o *CommandOptions) downloadTargetResource(kind string, name string) error 
 	return nil
 }
 
-func (o *CommandOptions) parseGroupVersionResource(kind string) (*schema.GroupVersionResource, error) {
-	convert2GVR := func(mapping *meta.RESTMapping, err error) (*schema.GroupVersionResource, error) {
-		if err != nil {
-			return nil, err
-		}
-		return &schema.GroupVersionResource{
-			Group:    mapping.Resource.Group,
-			Version:  mapping.Resource.Version,
-			Resource: mapping.Resource.Resource,
-		}, nil
-	}
-
+func (o *CommandOptions) parseResourceRestMapping(kind string) (*meta.RESTMapping, error) {
 	restMapper, err := o.utilFactory.ToRESTMapper()
 	if err != nil {
 		return nil, err
@@ -323,10 +322,10 @@ func (o *CommandOptions) parseGroupVersionResource(kind string) (*schema.GroupVe
 
 		slog.Debug("group/version invalid, parse kind", "group", kind.Group, "kind", kind.Kind)
 
-		return convert2GVR(restMapper.RESTMapping(kind, ""))
+		return restMapper.RESTMapping(kind, "")
 	}
 
 	slog.Debug("found fully specific kind for resource", "group", gvk.Group, "version", gvk.Version, "kind", gvk.Kind)
 
-	return convert2GVR(restMapper.RESTMapping(gvk.GroupKind(), gvk.Version))
+	return restMapper.RESTMapping(gvk.GroupKind(), gvk.Version)
 }
