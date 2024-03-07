@@ -8,4 +8,5 @@ Output and download any kubernetes resources in to named files.
 - [ ] support krew install
 - [ ] filter server fields (e.g. managed fields)
 - [x] github workflow
-- [ ] renovate
+- [x] renovate
+- [ ] zsh complete
