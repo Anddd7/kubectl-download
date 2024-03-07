@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -251,7 +252,19 @@ func (o *CommandOptions) getFilename(gvr schema.GroupVersionResource, name strin
 	if o.suffixTimestamp {
 		filenames = append(filenames, fmt.Sprintf("%d", o.timestamp))
 	}
-	return strings.Join(filenames, "_") + ".yaml"
+
+	filename := strings.Join(filenames, "_") + ".yaml"
+
+	if o.output != "." {
+		if _, err := os.Stat(o.output); os.IsNotExist(err) {
+			err := os.Mkdir(o.output, 0755)
+			if err != nil {
+				slog.Debug("failed to create output directory", "error", err)
+			}
+		}
+		filename = filepath.Join(o.output, filename)
+	}
+	return filename
 }
 
 func (o *CommandOptions) filterServerSideFields(unstructured *unstructured.Unstructured) {
