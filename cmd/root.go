@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v2"
@@ -31,30 +32,34 @@ func Execute() {
 	}
 }
 
-type GenericOptions struct {
+type CommandOptions struct {
+	// cli-runtime
 	configFlags *genericclioptions.ConfigFlags
 	ioStreams   genericiooptions.IOStreams
 
+	// input args
 	args []string
 
-	utilFactory util.Factory
-	restConfig  *rest.Config
-	rawConfig   api.Config
-
+	// kubectl flags
 	namespace string
 	context   string
 	user      string
+	// flags
+	output          string
+	clientFormat    bool
+	prefix          string
+	suffix          string
+	suffixTimestamp bool
+
+	// internal state
+	utilFactory util.Factory
+	restConfig  *rest.Config
+	rawConfig   api.Config
+	timestamp   int64
 }
 
-var (
-	optionOutput     string
-	optionTimestamp  bool
-	timestamp        int64 = metav1.Now().Unix()
-	optionClientSide bool
-)
-
 func NewCommand() *cobra.Command {
-	o := &GenericOptions{
+	o := &CommandOptions{
 		configFlags: genericclioptions.NewConfigFlags(true),
 		ioStreams:   genericiooptions.IOStreams{In: os.Stdin, Out: os.Stdout, ErrOut: os.Stderr},
 	}
@@ -85,12 +90,13 @@ func NewCommand() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&optionOutput, "output", "o", ".", "output path")
-	cmd.Flags().BoolVar(&optionTimestamp, "timestamp", false, "suffix timestamp")
-	cmd.Flags().BoolVar(&optionClientSide, "client", false, "remove server-side applied fields")
+	cmd.Flags().StringVarP(&o.output, "output", "o", ".", "output path")
+	cmd.Flags().BoolVar(&o.clientFormat, "client", false, "only output client applicable fields")
+	cmd.Flags().StringVar(&o.prefix, "prefix", "", "add prefix to the filename")
+	cmd.Flags().StringVar(&o.suffix, "suffix", "", "add suffix to the filename")
+	cmd.Flags().BoolVar(&o.suffixTimestamp, "suffix-timestamp", false, "add timestamp as suffix to the filename")
 
-	// o.configFlags.AddFlags(cmd.Flags())
-	// manually add flags
+	// manually add kubectl flags
 	if o.configFlags.Context != nil {
 		cmd.Flags().StringVar(o.configFlags.Context, "context", *o.configFlags.Context, "The name of the kubeconfig context to use")
 	}
@@ -103,10 +109,12 @@ func NewCommand() *cobra.Command {
 	return cmd
 }
 
-func (o *GenericOptions) Complete(cmd *cobra.Command, args []string) error {
+func (o *CommandOptions) Complete(cmd *cobra.Command, args []string) error {
 	var err error
 
 	o.args = args
+
+	// build internal state
 	o.utilFactory = util.NewFactory(o.configFlags)
 
 	configLoader := o.configFlags.ToRawKubeConfigLoader()
@@ -119,6 +127,9 @@ func (o *GenericOptions) Complete(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	o.timestamp = metav1.Now().Unix()
+
+	// set kubectl flags
 	o.context = getFlagOrDefault(cmd, "context", o.rawConfig.CurrentContext)
 	currentContext, exists := o.rawConfig.Contexts[o.context]
 	if !exists {
@@ -139,7 +150,7 @@ func getFlagOrDefault(cmd *cobra.Command, name string, defaultValue string) stri
 	return value
 }
 
-func (o *GenericOptions) Validate() error {
+func (o *CommandOptions) Validate() error {
 	if len(o.context) == 0 {
 		return errNoContext
 	}
@@ -153,7 +164,7 @@ func (o *GenericOptions) Validate() error {
 	return nil
 }
 
-func (o *GenericOptions) Run() error {
+func (o *CommandOptions) Run() error {
 	if len(o.args) == 1 {
 		return o.downloadAllResources(o.args[0])
 	}
@@ -165,7 +176,7 @@ func (o *GenericOptions) Run() error {
 	return nil
 }
 
-func (o *GenericOptions) downloadAllResources(kind string) error {
+func (o *CommandOptions) downloadAllResources(kind string) error {
 	gvr, err := o.parseGroupVersionResource(kind)
 	if err != nil {
 		return err
@@ -184,14 +195,14 @@ func (o *GenericOptions) downloadAllResources(kind string) error {
 	}
 
 	for _, item := range unstructured.Items {
-		filterServerSideFields(&item)
+		o.filterServerSideFields(&item)
 		content, err := yaml.Marshal(item.Object)
 		if err != nil {
 			return err
 		}
 
 		name := item.Object["metadata"].(map[string]interface{})["name"].(string)
-		filename := getFilename(*gvr, name)
+		filename := o.getFilename(*gvr, name)
 		err = os.WriteFile(filename, content, 0644)
 		if err != nil {
 			return err
@@ -203,20 +214,28 @@ func (o *GenericOptions) downloadAllResources(kind string) error {
 	return nil
 }
 
-func getFilename(gvr schema.GroupVersionResource, name string) string {
-	if optionTimestamp {
-		return fmt.Sprintf("%s_%s_%d.yaml", gvr.Resource, name, timestamp)
+func (o *CommandOptions) getFilename(gvr schema.GroupVersionResource, name string) string {
+	var filenames []string
+	if o.prefix != "" {
+		filenames = append(filenames, o.prefix)
 	}
-	return fmt.Sprintf("%s_%s.yaml", gvr.Resource, name)
+	filenames = append(filenames, gvr.Resource, name)
+	if o.suffix != "" {
+		filenames = append(filenames, o.suffix)
+	}
+	if o.suffixTimestamp {
+		filenames = append(filenames, fmt.Sprintf("%d", o.timestamp))
+	}
+	return strings.Join(filenames, "_") + ".yaml"
 }
 
-func filterServerSideFields(unstructured *unstructured.Unstructured) {
-	if optionClientSide {
+func (o *CommandOptions) filterServerSideFields(unstructured *unstructured.Unstructured) {
+	if o.clientFormat {
 		slog.Info("TODO: filter server side fields")
 	}
 }
 
-func (o *GenericOptions) downloadTargetResource(kind string, name string) error {
+func (o *CommandOptions) downloadTargetResource(kind string, name string) error {
 	gvr, err := o.parseGroupVersionResource(kind)
 	if err != nil {
 		return err
@@ -234,13 +253,13 @@ func (o *GenericOptions) downloadTargetResource(kind string, name string) error 
 		return err
 	}
 
-	filterServerSideFields(unstructured)
+	o.filterServerSideFields(unstructured)
 	content, err := yaml.Marshal(unstructured.Object)
 	if err != nil {
 		return err
 	}
 
-	filename := getFilename(*gvr, name)
+	filename := o.getFilename(*gvr, name)
 	err = os.WriteFile(filename, content, 0644)
 	if err != nil {
 		return err
@@ -251,7 +270,7 @@ func (o *GenericOptions) downloadTargetResource(kind string, name string) error 
 	return nil
 }
 
-func (o *GenericOptions) parseGroupVersionResource(kind string) (*schema.GroupVersionResource, error) {
+func (o *CommandOptions) parseGroupVersionResource(kind string) (*schema.GroupVersionResource, error) {
 	convert2GVR := func(mapping *meta.RESTMapping, err error) (*schema.GroupVersionResource, error) {
 		if err != nil {
 			return nil, err
