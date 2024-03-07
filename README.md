@@ -1,6 +1,6 @@
 # kubectl-download
 
-`kubectl download` any kubernetes resources
+Output and download any kubernetes resources in to named files.
 
 ## TODO
 
