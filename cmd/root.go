@@ -127,6 +127,9 @@ func NewCommand() *cobra.Command {
 	if o.configFlags.Username != nil {
 		cmd.Flags().StringVar(o.configFlags.Username, "user", *o.configFlags.Username, "The name of the kubeconfig user to use")
 	}
+
+	cmd.AddCommand(completionCmd)
+
 	return cmd
 }
 
