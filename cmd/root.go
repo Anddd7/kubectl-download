@@ -14,10 +14,7 @@ import (
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd/api"
-	"k8s.io/kubectl/pkg/cmd/util"
 
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -37,7 +34,8 @@ kubectl download ingress my-ingress -n my-namespace
 kubectl download pod my-pod --prefix my-prefix --suffix my-suffix -o dist
 	`
 
-	errNoContext = fmt.Errorf("no context is currently set, use %q to select a new one", "kubectl config use-context <context>")
+	errNoContext  = fmt.Errorf("no context is currently set, use %q to select a new one", "kubectl config use-context <context>")
+	errNoResource = fmt.Errorf("no such resource found")
 )
 
 func Execute() {
@@ -68,10 +66,8 @@ type CommandOptions struct {
 	suffixTimestamp bool
 
 	// internal state
-	utilFactory util.Factory
-	restConfig  *rest.Config
-	rawConfig   api.Config
-	timestamp   int64
+	restConfig *rest.Config
+	timestamp  int64
 }
 
 func NewCommand() *cobra.Command {
@@ -90,7 +86,7 @@ func NewCommand() *cobra.Command {
 				return nil, cobra.ShellCompDirectiveNoFileComp
 			}
 
-			list, err := o.getValidResources()
+			list, err := o.getValidResourceNames()
 			if err != nil {
 				return nil, cobra.ShellCompDirectiveNoFileComp
 			}
@@ -145,34 +141,29 @@ func NewCommand() *cobra.Command {
 }
 
 func (o *CommandOptions) Complete(cmd *cobra.Command, args []string) error {
-	var err error
-
-	o.args = args
-
-	// build internal state
-	o.utilFactory = util.NewFactory(o.configFlags)
-
 	configLoader := o.configFlags.ToRawKubeConfigLoader()
-	o.restConfig, err = configLoader.ClientConfig()
+	restConfig, err := configLoader.ClientConfig()
 	if err != nil {
 		return err
 	}
-	o.rawConfig, err = configLoader.RawConfig()
+	rawConfig, err := configLoader.RawConfig()
 	if err != nil {
 		return err
 	}
 
-	o.timestamp = metav1.Now().Unix()
-
-	// set kubectl flags
-	o.context = getFlagOrDefault(cmd, "context", o.rawConfig.CurrentContext)
-	currentContext, exists := o.rawConfig.Contexts[o.context]
+	context := getFlagOrDefault(cmd, "context", rawConfig.CurrentContext)
+	targetContext, exists := rawConfig.Contexts[context]
 	if !exists {
 		return errNoContext
 	}
 
-	o.namespace = getFlagOrDefault(cmd, "namespace", currentContext.Namespace)
-	o.user = getFlagOrDefault(cmd, "user", currentContext.AuthInfo)
+	// override flags
+	o.args = args
+	o.namespace = getFlagOrDefault(cmd, "namespace", targetContext.Namespace)
+	o.context = context
+	o.user = getFlagOrDefault(cmd, "user", targetContext.AuthInfo)
+	o.restConfig = restConfig
+	o.timestamp = metav1.Now().Unix()
 
 	return nil
 }
@@ -212,12 +203,15 @@ func (o *CommandOptions) Run() error {
 }
 
 func (o *CommandOptions) downloadAllResources(kind string) error {
-	mapping, err := o.parseResourceRestMapping(kind)
+	resource, err := o.getAPIResource(kind)
 	if err != nil {
 		return err
 	}
-
-	slog.Debug("found resource", "scope", mapping.Scope, "group", mapping.GroupVersionKind.Group, "version", mapping.GroupVersionKind.Version, "resource", mapping.GroupVersionKind.Kind)
+	gvr := schema.GroupVersionResource{
+		Group:    resource.Group,
+		Version:  resource.Version,
+		Resource: resource.Name,
+	}
 
 	dynamicClient, err := dynamic.NewForConfig(o.restConfig)
 	if err != nil {
@@ -225,10 +219,10 @@ func (o *CommandOptions) downloadAllResources(kind string) error {
 	}
 
 	var unstructured *unstructured.UnstructuredList
-	if mapping.Scope.Name() == meta.RESTScopeNameNamespace {
-		unstructured, err = dynamicClient.Resource(mapping.Resource).Namespace(o.namespace).List(context.TODO(), metav1.ListOptions{})
+	if resource.Namespaced {
+		unstructured, err = dynamicClient.Resource(gvr).Namespace(o.namespace).List(context.TODO(), metav1.ListOptions{})
 	} else {
-		unstructured, err = dynamicClient.Resource(mapping.Resource).List(context.TODO(), metav1.ListOptions{})
+		unstructured, err = dynamicClient.Resource(gvr).List(context.TODO(), metav1.ListOptions{})
 	}
 	if err != nil {
 		return err
@@ -242,7 +236,7 @@ func (o *CommandOptions) downloadAllResources(kind string) error {
 		}
 
 		name := item.Object["metadata"].(map[string]interface{})["name"].(string)
-		filename := o.getFilename(mapping.Resource, name)
+		filename := o.getFilename(gvr, name)
 		err = os.WriteFile(filename, content, 0644)
 		if err != nil {
 			return err
@@ -288,12 +282,15 @@ func (o *CommandOptions) filterServerSideFields(unstructured *unstructured.Unstr
 }
 
 func (o *CommandOptions) downloadTargetResource(kind string, name string) error {
-	mapping, err := o.parseResourceRestMapping(kind)
+	resource, err := o.getAPIResource(kind)
 	if err != nil {
 		return err
 	}
-
-	slog.Debug("found resource", "scope", mapping.Scope, "group", mapping.GroupVersionKind.Group, "version", mapping.GroupVersionKind.Version, "resource", mapping.GroupVersionKind.Kind)
+	gvr := schema.GroupVersionResource{
+		Group:    resource.Group,
+		Version:  resource.Version,
+		Resource: resource.Name,
+	}
 
 	dynamicClient, err := dynamic.NewForConfig(o.restConfig)
 	if err != nil {
@@ -301,10 +298,10 @@ func (o *CommandOptions) downloadTargetResource(kind string, name string) error 
 	}
 
 	var unstructured *unstructured.Unstructured
-	if mapping.Scope.Name() == meta.RESTScopeNameNamespace {
-		unstructured, err = dynamicClient.Resource(mapping.Resource).Namespace(o.namespace).Get(context.TODO(), name, metav1.GetOptions{})
+	if resource.Namespaced {
+		unstructured, err = dynamicClient.Resource(gvr).Namespace(o.namespace).Get(context.TODO(), name, metav1.GetOptions{})
 	} else {
-		unstructured, err = dynamicClient.Resource(mapping.Resource).Get(context.TODO(), name, metav1.GetOptions{})
+		unstructured, err = dynamicClient.Resource(gvr).Get(context.TODO(), name, metav1.GetOptions{})
 	}
 	if err != nil {
 		return err
@@ -316,7 +313,7 @@ func (o *CommandOptions) downloadTargetResource(kind string, name string) error 
 		return err
 	}
 
-	filename := o.getFilename(mapping.Resource, name)
+	filename := o.getFilename(gvr, name)
 	err = os.WriteFile(filename, content, 0644)
 	if err != nil {
 		return err
@@ -327,7 +324,7 @@ func (o *CommandOptions) downloadTargetResource(kind string, name string) error 
 	return nil
 }
 
-func (o *CommandOptions) getValidResources() ([]string, error) {
+func (o *CommandOptions) getValidResourceNames() ([]string, error) {
 	dc, err := o.configFlags.ToDiscoveryClient()
 	if err != nil {
 		return nil, err
@@ -353,32 +350,84 @@ func (o *CommandOptions) getValidResources() ([]string, error) {
 	return list, nil
 }
 
-func (o *CommandOptions) parseResourceRestMapping(kind string) (*meta.RESTMapping, error) {
-	restMapper, err := o.utilFactory.ToRESTMapper()
+func (o *CommandOptions) getAPIResource(kind string) (*metav1.APIResource, error) {
+	inputGVR, inputResource := schema.ParseResourceArg(kind)
+	if inputGVR == nil {
+		withoutVersion := inputResource.WithVersion("")
+		inputGVR = &withoutVersion
+	}
+	slog.Debug("parsed input resource",
+		"group-v", inputGVR.Group, "version-v", inputGVR.Version,
+		"group", inputResource.Group, "resource", inputResource.Resource,
+	)
+
+	dc, err := o.configFlags.ToDiscoveryClient()
+	if err != nil {
+		return nil, err
+	}
+	resourceLists, err := dc.ServerPreferredResources()
 	if err != nil {
 		return nil, err
 	}
 
-	gvr, resource := schema.ParseResourceArg(kind)
-	if gvr == nil {
-		slog.Debug("version is empty")
+	for _, resourceList := range resourceLists {
+		gv, err := schema.ParseGroupVersion(resourceList.GroupVersion)
+		if err != nil {
+			return nil, err
+		}
 
-		withoutVersion := resource.WithVersion("")
-		gvr = &withoutVersion
+		for i := range resourceList.APIResources {
+			resource := &resourceList.APIResources[i]
+			resource.Group = gv.Group
+			resource.Version = gv.Version
+
+			if isMatchedResource(inputGVR, inputResource, resource) {
+				slog.Debug("got matched resource",
+					"group", resource.Group, "version", resource.Version, "resource", resource.Name, "namespaced", resource.Namespaced, "kind", resource.Kind,
+				)
+				return resource, nil
+			}
+		}
 	}
 
-	slog.Debug("parsed resource", "group", gvr.Group, "version", gvr.Version, "resource", gvr.Resource)
+	return nil, errNoResource
+}
 
-	gvk, err := restMapper.KindFor(*gvr)
-	if err != nil {
-		_, kind := schema.ParseKindArg(kind)
+func isMatchedResource(gvr *schema.GroupVersionResource, res schema.GroupResource, resource *metav1.APIResource) bool {
+	// assume gvr is valid
+	isGroupMatched := gvr.Group == "" || gvr.Group == resource.Group
+	isVersionMatched := gvr.Version == "" || gvr.Version == resource.Version
+	isResourceMatched := gvr.Resource == resource.Name || gvr.Resource == resource.SingularName || gvr.Resource == resource.Kind ||
+		// tips:: to match resource without singular(i don't know why), e.g. ingress
+		gvr.Resource == strings.ToLower(resource.Kind)
 
-		slog.Debug("group/version invalid, parse kind", "group", kind.Group, "kind", kind.Kind)
-
-		return restMapper.RESTMapping(kind, "")
+	for _, shortName := range resource.ShortNames {
+		if gvr.Resource == shortName {
+			isResourceMatched = true
+		}
 	}
 
-	slog.Debug("found fully specific kind for resource", "group", gvk.Group, "version", gvk.Version, "kind", gvk.Kind)
+	if isGroupMatched && isVersionMatched && isResourceMatched {
+		return true
+	}
 
-	return restMapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+	// slog.Debug("[GVR] resource not matched - "+resource.Name,
+	// 	"isGroupMatched", isGroupMatched,
+	// 	"isVersionMatched", isVersionMatched,
+	// 	"isResourceMatched", isResourceMatched,
+	// )
+
+	// assume gvr is invalid (version is empty)
+	isGroupMatched = res.Group == "" || res.Group == resource.Group
+
+	if isGroupMatched && isResourceMatched {
+		return true
+	}
+
+	// slog.Debug("[GR] resource not matched - "+resource.Name,
+	// 	"isGroupMatched", isGroupMatched,
+	// 	"isResourceMatched", isResourceMatched,
+	// )
+
+	return false
 }
