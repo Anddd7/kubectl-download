@@ -7,7 +7,10 @@ It simplifies the process of `kubectl get pod nginx -oyaml > nginx.yaml`, you do
 ## How to use
 
 ```sh
-kubectl krew install download
+# kubectl krew install download
+# PR is still pending, so use the following command to install
+
+kubectl krew install --manifest-url https://raw.githubusercontent.com/krew-release-bot/krew-index/Anddd7-download-kubectl-download-v0.0.4/plugins/download.yaml
 
 kubectl donwload pod
 kubectl download deploy my-deploy
