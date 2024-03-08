@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Anddd7/kubectldownload/pkg"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v2"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
@@ -86,17 +85,17 @@ func NewCommand() *cobra.Command {
 		Short:   shortText,
 		Example: helperText,
 		Args:    cobra.MaximumNArgs(2),
-		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		ValidArgsFunction: func(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
 			if len(args) > 0 {
 				return nil, cobra.ShellCompDirectiveNoFileComp
 			}
 
-			resourceNames, err := pkg.GetAPIResources()
+			list, err := o.getValidResources()
 			if err != nil {
 				return nil, cobra.ShellCompDirectiveNoFileComp
 			}
 
-			return resourceNames, cobra.ShellCompDirectiveNoFileComp
+			return list, cobra.ShellCompDirectiveNoFileComp
 		},
 		RunE: func(c *cobra.Command, args []string) error {
 			if o.debug {
@@ -326,6 +325,32 @@ func (o *CommandOptions) downloadTargetResource(kind string, name string) error 
 	fmt.Printf("downloaded: %s\n", filename)
 
 	return nil
+}
+
+func (o *CommandOptions) getValidResources() ([]string, error) {
+	dc, err := o.configFlags.ToDiscoveryClient()
+	if err != nil {
+		return nil, err
+	}
+	resourceLists, err := dc.ServerPreferredResources()
+	if err != nil {
+		return nil, err
+	}
+
+	// Create a set of all resource names
+	resourceNames := make(map[string]struct{})
+	for _, resourceList := range resourceLists {
+		for _, resource := range resourceList.APIResources {
+			resourceNames[resource.Name] = struct{}{}
+		}
+	}
+
+	// Convert the set to a slice
+	var list []string
+	for resourceName := range resourceNames {
+		list = append(list, resourceName)
+	}
+	return list, nil
 }
 
 func (o *CommandOptions) parseResourceRestMapping(kind string) (*meta.RESTMapping, error) {

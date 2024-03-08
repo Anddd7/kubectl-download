@@ -44,5 +44,5 @@ Or using [plugin-completion](https://github.com/marckhouzam/kubectl-plugin_compl
 - [x] github workflow
 - [x] renovate
 - [x] zsh complete
-  - [ ] get api-resources from kube cache
+  - [x] get api-resources from kube cache
   - [ ] resource name completion
