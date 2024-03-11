@@ -26,5 +26,6 @@ jobs:
     - name: Fetch krew manifest
       run: |
         curl -o plugins/download.yaml https://raw.githubusercontent.com/krew-release-bot/krew-index/Anddd7-download-kubectl-download-${{  github.ref_name }}/plugins/download.yaml
-    - name: Commit to custom index
-      uses: stefanzweifel/git-auto-commit-action@v5
+    - name: Create Pull Request
+      uses: peter-evans/create-pull-request@v6
+        
