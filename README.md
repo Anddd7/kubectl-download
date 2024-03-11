@@ -24,7 +24,7 @@ Install the plugin
 
 - `kubectl krew install download/download`
 
-### - krew install directly
+### krew install directly
 
 Install vai custom manifest
 
