@@ -7,19 +7,42 @@ It simplifies the process of `kubectl get pod nginx -oyaml > nginx.yaml`, you do
 ## How to use
 
 ```sh
-# kubectl krew install download
-# PR is still pending, so use the following command to install
-
-kubectl krew install --manifest-url https://raw.githubusercontent.com/krew-release-bot/krew-index/Anddd7-download-kubectl-download-v0.0.4/plugins/download.yaml
-
 kubectl donwload pod
 kubectl download deploy my-deploy
 kubectl download ingress my-ingress -n my-namespace
 ```
 
-### Completion
+## Install
 
-Register completion for plugins for kubectl
+### krew custom index
+
+Add the index
+
+- `kubectl krew index add download https://github.com/Anddd7/kubectl-download.git`
+
+Install the plugin
+
+- `kubectl krew install download/download`
+
+### - krew install directly
+
+Install vai custom manifest
+
+- `kubectl krew install --manifest-url https://raw.githubusercontent.com/Anddd7/kubectl-download/main/plugins/download.yaml`
+
+### manual install
+
+Enter the latest release and download the binary for your platform
+
+- `curl -o kubectl-download https://github.com/Anddd7/kubectl-download/releases/download/v0.0.4/kubectl-download_v0.0.4_linux_arm64.tar.gz`
+
+Move it the krew bin directory or any directory in your PATH
+
+- `mv kubectl-download ~/.krew/bin`
+
+## Completion
+
+Register completion for plugins of kubectl
 
 ```sh
 # download completion shell script
@@ -37,7 +60,7 @@ Or using [plugin-completion](https://github.com/marckhouzam/kubectl-plugin_compl
 ## TODO
 
 - [x] docs
-- [x] support krew install
+- [x] support krew install (custom index)
 - [ ] filter server fields (e.g. managed fields)
   - drop specific fields in yaml file
   - or delete key from map interface before marshalling
