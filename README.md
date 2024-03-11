@@ -34,7 +34,7 @@ Install vai custom manifest
 
 Enter the latest release and download the binary for your platform
 
-- `curl -o kubectl-download https://github.com/Anddd7/kubectl-download/releases/download/v0.0.4/kubectl-download_v0.0.4_linux_arm64.tar.gz`
+- `curl -o kubectl-download https://github.com/Anddd7/kubectl-download/releases/download/v1.0.0/kubectl-download_v1.0.0_linux_arm64.tar.gz`
 
 Move it the krew bin directory or any directory in your PATH
 

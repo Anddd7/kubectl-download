@@ -30,5 +30,6 @@ jobs:
       uses: peter-evans/create-pull-request@v6
       with:
         base: main
-        title: Update kubectl-download to v${{ github.ref_name }}
+        title: Update kubectl-download to ${{ github.ref_name }}
+        delete-branch: true
         
