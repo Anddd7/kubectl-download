@@ -1,6 +1,6 @@
 module github.com/Anddd7/kubectldownload
 
-go 1.22.0
+go 1.22.2
 
 require (
 	github.com/alecthomas/kong v0.9.0
