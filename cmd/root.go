@@ -275,7 +275,7 @@ func (o *CommandOptions) getFilename(gvr schema.GroupVersionResource, name strin
 	return filename
 }
 
-func (o *CommandOptions) filterServerSideFields(unstructured *unstructured.Unstructured) {
+func (o *CommandOptions) filterServerSideFields(_ *unstructured.Unstructured) {
 	if o.clientFormat {
 		slog.Debug("TODO: filter server side fields")
 	}
