@@ -1,6 +1,9 @@
 before:
   hooks:
-  - go mod download
+  - make clean
+  - make dep
+  - make build
+  - make check
 builds:
 - id: kubectl-download
   main: .

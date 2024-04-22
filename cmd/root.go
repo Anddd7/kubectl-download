@@ -237,7 +237,7 @@ func (o *CommandOptions) downloadAllResources(kind string) error {
 
 		name := item.Object["metadata"].(map[string]interface{})["name"].(string)
 		filename := o.getFilename(gvr, name)
-		err = os.WriteFile(filename, content, 0644)
+		err = os.WriteFile(filename, content, 0o644)
 		if err != nil {
 			return err
 		}
@@ -265,7 +265,7 @@ func (o *CommandOptions) getFilename(gvr schema.GroupVersionResource, name strin
 
 	if o.output != "." {
 		if _, err := os.Stat(o.output); os.IsNotExist(err) {
-			err := os.Mkdir(o.output, 0755)
+			err := os.Mkdir(o.output, 0o755)
 			if err != nil {
 				slog.Debug("failed to create output directory", "error", err)
 			}
@@ -314,7 +314,7 @@ func (o *CommandOptions) downloadTargetResource(kind string, name string) error 
 	}
 
 	filename := o.getFilename(gvr, name)
-	err = os.WriteFile(filename, content, 0644)
+	err = os.WriteFile(filename, content, 0o644)
 	if err != nil {
 		return err
 	}
