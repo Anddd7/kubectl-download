@@ -37,7 +37,7 @@ jobs:
         curl -o plugins/download.yaml https://raw.githubusercontent.com/krew-release-bot/krew-index/Anddd7-download-kubectl-download-${{  github.ref_name }}/plugins/download.yaml
 
     - name: Create Pull Request
-      uses: peter-evans/create-pull-request@v6
+      uses: peter-evans/create-pull-request@v8
       with:
         base: main
         title: Update kubectl-download to ${{ github.ref_name }}
